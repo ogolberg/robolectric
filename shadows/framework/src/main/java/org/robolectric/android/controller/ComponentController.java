@@ -1,5 +1,7 @@
 package org.robolectric.android.controller;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import android.content.Intent;
 import android.os.Looper;
 import org.robolectric.RuntimeEnvironment;
@@ -50,12 +52,15 @@ public abstract class ComponentController<C extends ComponentController<C, T>, T
   }
 
   protected C invokeWhilePaused(final String methodName, final ClassParameter<?>... classParameters) {
-    shadowMainLooper.runPaused(new Runnable() {
-      @Override
-      public void run() {
-        ReflectionHelpers.callInstanceMethod(component, methodName, classParameters);
-      }
-    });
+    shadowMainLooper.runPaused(
+        new Runnable() {
+          @Override
+          public void run() {
+            checkState(
+                Looper.myLooper() == Looper.getMainLooper(), "Expecting to be on main thread!");
+            ReflectionHelpers.callInstanceMethod(component, methodName, classParameters);
+          }
+        });
     return myself;
   }
 }
