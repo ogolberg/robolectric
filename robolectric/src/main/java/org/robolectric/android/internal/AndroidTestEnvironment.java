@@ -176,6 +176,8 @@ public class AndroidTestEnvironment implements TestEnvironment {
     RuntimeEnvironment.setAndroidFrameworkJarPath(sdkJarPath);
     Bootstrap.setDisplayConfiguration(androidConfiguration, displayMetrics);
     RuntimeEnvironment.setActivityThread(ReflectionHelpers.newInstance(ActivityThread.class));
+    ReflectionHelpers.setStaticField(
+        ActivityThread.class, "sMainThreadHandler", new Handler(Looper.myLooper()));
 
     Instrumentation instrumentation = createInstrumentation();
     InstrumentationRegistry.registerInstance(instrumentation, new Bundle());
@@ -278,9 +280,6 @@ public class AndroidTestEnvironment implements TestEnvironment {
 
     shadowActivityThread.setCompatConfiguration(androidConfiguration);
 
-    ReflectionHelpers.setStaticField(
-        ActivityThread.class, "sMainThreadHandler", new Handler(Looper.myLooper()));
-
     Bootstrap.setUpDisplay();
     activityThread.applyConfigurationToResources(androidConfiguration);
 
@@ -335,6 +334,8 @@ public class AndroidTestEnvironment implements TestEnvironment {
       registerBroadcastReceivers(application, appManifest);
 
       appResources.updateConfiguration(androidConfiguration, displayMetrics);
+      // propagate any updates to configuration via RuntimeEnvironment.setQualifiers
+      Bootstrap.updateConfiguration(appResources);
 
       if (ShadowAssetManager.useLegacy()) {
         populateAssetPaths(appResources.getAssets(), appManifest);
@@ -583,11 +584,23 @@ public class AndroidTestEnvironment implements TestEnvironment {
   @Override
   public void checkStateAfterTestFailure(Throwable t) throws Throwable {
     if (hasUnexecutedRunnables()) {
-      throw new Exception(
-          "Main looper has queued unexecuted runnables. "
+      t.addSuppressed(new UnExecutedRunnablesException());
+    }
+    throw t;
+  }
+
+  private static final class UnExecutedRunnablesException extends Exception {
+
+    UnExecutedRunnablesException() {
+      super("Main looper has queued unexecuted runnables. "
               + "This might be the cause of the test failure. "
-              + "You might need a shadowOf(getMainLooper()).idle() call.",
-          t);
+              + "You might need a shadowOf(getMainLooper()).idle() call.");
+    }
+
+    @Override
+    public synchronized Throwable fillInStackTrace() {
+      setStackTrace(new StackTraceElement[0]);
+      return this; // no stack trace, wouldn't be useful anyway
     }
   }
 
