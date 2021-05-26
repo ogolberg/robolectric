@@ -9,8 +9,11 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.util.DisplayMetrics;
+import android.util.Pair;
 import com.google.common.base.Supplier;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import org.robolectric.android.Bootstrap;
 import org.robolectric.android.ConfigurationV25;
 import org.robolectric.res.ResourceTable;
@@ -47,6 +50,8 @@ public class RuntimeEnvironment {
   private static boolean useLegacyResources;
   private static Supplier<Application> applicationSupplier;
   private static final Object supplierLock = new Object();
+  private static List<Pair<Configuration, DisplayMetrics>> delayedConfigurationUpdates =
+      new ArrayList<>();
 
   /**
    * Get a reference to the {@link Application} under test.
@@ -69,6 +74,11 @@ public class RuntimeEnvironment {
       synchronized (supplierLock) {
         if (applicationSupplier != null) {
           application = applicationSupplier.get();
+          // propagate any updates to configuration via setQualifiers
+          for (Pair<Configuration, DisplayMetrics> p : delayedConfigurationUpdates) {
+            application.getResources().updateConfiguration(p.first, p.second);
+          }
+          delayedConfigurationUpdates.clear();
         }
       }
     }
@@ -204,6 +214,10 @@ public class RuntimeEnvironment {
     systemResources.updateConfiguration(configuration, displayMetrics);
     if (RuntimeEnvironment.application != null) {
       getApplication().getResources().updateConfiguration(configuration, displayMetrics);
+    } else {
+      // if application is not yet loaded, keep note of the changes so that the
+      // changes can be propagated once the application is finally loaded
+      delayedConfigurationUpdates.add(new Pair<>(configuration, displayMetrics));
     }
   }
 
