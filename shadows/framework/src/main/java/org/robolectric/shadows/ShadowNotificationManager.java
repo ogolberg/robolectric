@@ -3,6 +3,7 @@ package org.robolectric.shadows;
 import static android.app.NotificationManager.INTERRUPTION_FILTER_ALL;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.O_MR1;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
 
@@ -11,11 +12,13 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.NotificationManager.Policy;
+import android.content.ComponentName;
 import android.os.Build;
 import android.os.Parcel;
 import android.service.notification.StatusBarNotification;
 import androidx.annotation.NonNull;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
@@ -42,6 +45,7 @@ public class ShadowNotificationManager {
   private final Map<String, Object> notificationChannelGroups = new ConcurrentHashMap<>();
   private final Map<String, Object> deletedNotificationChannels = new ConcurrentHashMap<>();
   private final Map<String, AutomaticZenRule> automaticZenRules = new ConcurrentHashMap<>();
+  private final Map<String, Boolean> listenerAccessGrantedComponents = new ConcurrentHashMap<>();
   private final Set<String> canNotifyOnBehalfPackages = Sets.newConcurrentHashSet();
 
   private int currentInteruptionFilter = INTERRUPTION_FILTER_ALL;
@@ -168,9 +172,25 @@ public class ShadowNotificationManager {
     // for more info.
     if (deletedNotificationChannels.containsKey(id)) {
       notificationChannels.put(id, deletedNotificationChannels.remove(id));
-    } else {
-      notificationChannels.put(id, channel);
     }
+    NotificationChannel existingChannel = (NotificationChannel) notificationChannels.get(id);
+    // Per documentation, recreating a channel can change name and description, lower importance or
+    // set a group if no group set. Other settings remain unchanged. See
+    // https://developer.android.com/reference/android/app/NotificationManager#createNotificationChannel%28android.app.NotificationChannel@29
+    // for more info.
+    if (existingChannel != null) {
+      NotificationChannel newChannel = (NotificationChannel) channel;
+      existingChannel.setName(newChannel.getName());
+      existingChannel.setDescription(newChannel.getDescription());
+      if (newChannel.getImportance() < existingChannel.getImportance()) {
+        existingChannel.setImportance(newChannel.getImportance());
+      }
+      if (Strings.isNullOrEmpty(existingChannel.getGroup())) {
+        existingChannel.setGroup(newChannel.getGroup());
+      }
+      return;
+    }
+    notificationChannels.put(id, channel);
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
@@ -247,6 +267,15 @@ public class ShadowNotificationManager {
   }
 
   /**
+   * @return the value specified for the given {@link ComponentName} via
+   * {@link #setNotificationListenerAccessGranted(ComponentName, boolean)} or false if unset.
+   */
+  @Implementation(minSdk = O_MR1)
+  protected final boolean isNotificationListenerAccessGranted(ComponentName componentName) {
+    return listenerAccessGrantedComponents.getOrDefault(componentName.flattenToString(), false);
+  }
+
+  /**
    * Currently does not support checking for granted policy access.
    *
    * @see NotificationManager#getNotificationPolicy()
@@ -267,6 +296,15 @@ public class ShadowNotificationManager {
     if (!granted) {
       automaticZenRules.clear();
     }
+  }
+
+  /**
+   * Sets the value returned by
+   * {@link NotificationManager#isNotificationListenerAccessGranted(ComponentName)} for the provided
+   * {@link ComponentName}.
+   */
+  public void setNotificationListenerAccessGranted(ComponentName componentName, boolean granted) {
+    listenerAccessGrantedComponents.put(componentName.flattenToString(), granted);
   }
 
   @Implementation(minSdk = N)
